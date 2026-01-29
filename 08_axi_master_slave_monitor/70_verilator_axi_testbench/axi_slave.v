@@ -73,9 +73,29 @@ module axi_slave #(
     //--------------------------------------------------------------------------
     // Read Response FIFOs (one per ID for out-of-order support)
     //--------------------------------------------------------------------------
-    reg [DATA_WIDTH-1:0] rd_data_fifo [0:N_IDS-1][0:FIFO_DEPTH-1];
-    reg [3:0] rd_data_wr_ptr [0:N_IDS-1];
-    reg [3:0] rd_data_rd_ptr [0:N_IDS-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_0 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_1 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_2 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_3 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_4 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_5 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_6 [0:FIFO_DEPTH-1];
+    reg [DATA_WIDTH-1:0] rd_data_fifo_7 [0:FIFO_DEPTH-1];
+
+    reg [3:0] rd_wr_ptr_0, rd_wr_ptr_1, rd_wr_ptr_2, rd_wr_ptr_3;
+    reg [3:0] rd_wr_ptr_4, rd_wr_ptr_5, rd_wr_ptr_6, rd_wr_ptr_7;
+    reg [3:0] rd_rd_ptr_0, rd_rd_ptr_1, rd_rd_ptr_2, rd_rd_ptr_3;
+    reg [3:0] rd_rd_ptr_4, rd_rd_ptr_5, rd_rd_ptr_6, rd_rd_ptr_7;
+
+    // Check if FIFO has data
+    wire has_data_0 = (rd_wr_ptr_0 != rd_rd_ptr_0);
+    wire has_data_1 = (rd_wr_ptr_1 != rd_rd_ptr_1);
+    wire has_data_2 = (rd_wr_ptr_2 != rd_rd_ptr_2);
+    wire has_data_3 = (rd_wr_ptr_3 != rd_rd_ptr_3);
+    wire has_data_4 = (rd_wr_ptr_4 != rd_rd_ptr_4);
+    wire has_data_5 = (rd_wr_ptr_5 != rd_rd_ptr_5);
+    wire has_data_6 = (rd_wr_ptr_6 != rd_rd_ptr_6);
+    wire has_data_7 = (rd_wr_ptr_7 != rd_rd_ptr_7);
 
     // Write response counter
     reg [7:0] wr_resp_counter;
@@ -152,71 +172,187 @@ module axi_slave #(
     end
 
     //--------------------------------------------------------------------------
-    // Read Address Channel Handler
+    // Read Address Channel Handler (separate always blocks per ID)
     //--------------------------------------------------------------------------
-    integer i;
     always @(posedge clk) begin
         if (rst) begin
-            for (i = 0; i < N_IDS; i = i + 1)
-                rd_data_wr_ptr[i] <= 0;
+            rd_wr_ptr_0 <= 0; rd_wr_ptr_1 <= 0; rd_wr_ptr_2 <= 0; rd_wr_ptr_3 <= 0;
+            rd_wr_ptr_4 <= 0; rd_wr_ptr_5 <= 0; rd_wr_ptr_6 <= 0; rd_wr_ptr_7 <= 0;
         end else if (arvalid && arready) begin
-            rd_data_fifo[arid][rd_data_wr_ptr[arid][2:0]] <=
-                memory[araddr[ADDR_BITS-1:0]];
-            rd_data_wr_ptr[arid] <= rd_data_wr_ptr[arid] + 1;
             $display("%0t slave: read address received: addr=%h id=%0d data=%h",
                      $time, araddr, arid, memory[araddr[ADDR_BITS-1:0]]);
+            case (arid[2:0])
+                3'd0: begin rd_data_fifo_0[rd_wr_ptr_0[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_0 <= rd_wr_ptr_0 + 1; end
+                3'd1: begin rd_data_fifo_1[rd_wr_ptr_1[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_1 <= rd_wr_ptr_1 + 1; end
+                3'd2: begin rd_data_fifo_2[rd_wr_ptr_2[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_2 <= rd_wr_ptr_2 + 1; end
+                3'd3: begin rd_data_fifo_3[rd_wr_ptr_3[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_3 <= rd_wr_ptr_3 + 1; end
+                3'd4: begin rd_data_fifo_4[rd_wr_ptr_4[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_4 <= rd_wr_ptr_4 + 1; end
+                3'd5: begin rd_data_fifo_5[rd_wr_ptr_5[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_5 <= rd_wr_ptr_5 + 1; end
+                3'd6: begin rd_data_fifo_6[rd_wr_ptr_6[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_6 <= rd_wr_ptr_6 + 1; end
+                3'd7: begin rd_data_fifo_7[rd_wr_ptr_7[2:0]] <= memory[araddr[ADDR_BITS-1:0]]; rd_wr_ptr_7 <= rd_wr_ptr_7 + 1; end
+            endcase
         end
     end
 
     //--------------------------------------------------------------------------
     // Read Response Channel (Out-of-Order based on ID)
+    // Use combinational logic to select ID, sequential to update
     //--------------------------------------------------------------------------
-    reg [ID_WIDTH-1:0] current_id;
-    reg found_data;
+    reg [2:0] selected_id;
+    reg       found_data;
+    reg [DATA_WIDTH-1:0] selected_data;
 
+    // Combinational: find an ID with pending data (random starting point)
+    always @(*) begin
+        found_data = 0;
+        selected_id = 0;
+        selected_data = 0;
+
+        // Check IDs in pseudo-random order based on LFSR
+        case (lfsr[2:0])
+            3'd0: begin
+                if      (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+            end
+            3'd1: begin
+                if      (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+            end
+            3'd2: begin
+                if      (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+            end
+            3'd3: begin
+                if      (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+            end
+            3'd4: begin
+                if      (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+            end
+            3'd5: begin
+                if      (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+            end
+            3'd6: begin
+                if      (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+            end
+            3'd7: begin
+                if      (has_data_1) begin selected_id = 1; selected_data = rd_data_fifo_1[rd_rd_ptr_1[2:0]]; found_data = 1; end
+                else if (has_data_7) begin selected_id = 7; selected_data = rd_data_fifo_7[rd_rd_ptr_7[2:0]]; found_data = 1; end
+                else if (has_data_5) begin selected_id = 5; selected_data = rd_data_fifo_5[rd_rd_ptr_5[2:0]]; found_data = 1; end
+                else if (has_data_2) begin selected_id = 2; selected_data = rd_data_fifo_2[rd_rd_ptr_2[2:0]]; found_data = 1; end
+                else if (has_data_4) begin selected_id = 4; selected_data = rd_data_fifo_4[rd_rd_ptr_4[2:0]]; found_data = 1; end
+                else if (has_data_6) begin selected_id = 6; selected_data = rd_data_fifo_6[rd_rd_ptr_6[2:0]]; found_data = 1; end
+                else if (has_data_0) begin selected_id = 0; selected_data = rd_data_fifo_0[rd_rd_ptr_0[2:0]]; found_data = 1; end
+                else if (has_data_3) begin selected_id = 3; selected_data = rd_data_fifo_3[rd_rd_ptr_3[2:0]]; found_data = 1; end
+            end
+        endcase
+    end
+
+    // Sequential: update read response and pointers
     always @(posedge clk) begin
         if (rst) begin
             rvalid <= 1'b0;
             rdata <= 0;
             rid <= 0;
-            for (i = 0; i < N_IDS; i = i + 1)
-                rd_data_rd_ptr[i] <= 0;
+            rd_rd_ptr_0 <= 0; rd_rd_ptr_1 <= 0; rd_rd_ptr_2 <= 0; rd_rd_ptr_3 <= 0;
+            rd_rd_ptr_4 <= 0; rd_rd_ptr_5 <= 0; rd_rd_ptr_6 <= 0; rd_rd_ptr_7 <= 0;
         end else if (!rvalid || rready) begin
-            rvalid <= 1'b0;
-            found_data = 0;
+            if (found_data) begin
+                rdata <= selected_data;
+                rid <= {1'b0, selected_id};
+                rvalid <= 1'b1;
+                $display("%0t slave: read response sent: id=%0d data=%h", $time, selected_id, selected_data);
 
-            // Random starting point for out-of-order behavior
-            current_id = lfsr[ID_WIDTH-1:0];
-
-            for (i = 0; i < N_IDS && !found_data; i = i + 1) begin
-                current_id = (current_id + 1) % N_IDS;
-                if (rd_data_wr_ptr[current_id] != rd_data_rd_ptr[current_id]) begin
-                    rdata <= rd_data_fifo[current_id][rd_data_rd_ptr[current_id][2:0]];
-                    rid <= current_id;
-                    rvalid <= 1'b1;
-                    rd_data_rd_ptr[current_id] <= rd_data_rd_ptr[current_id] + 1;
-                    found_data = 1;
-                    $display("%0t slave: read response sent: id=%0d data=%h",
-                             $time, current_id,
-                             rd_data_fifo[current_id][rd_data_rd_ptr[current_id][2:0]]);
-                end
+                // Update the appropriate read pointer
+                case (selected_id)
+                    3'd0: rd_rd_ptr_0 <= rd_rd_ptr_0 + 1;
+                    3'd1: rd_rd_ptr_1 <= rd_rd_ptr_1 + 1;
+                    3'd2: rd_rd_ptr_2 <= rd_rd_ptr_2 + 1;
+                    3'd3: rd_rd_ptr_3 <= rd_rd_ptr_3 + 1;
+                    3'd4: rd_rd_ptr_4 <= rd_rd_ptr_4 + 1;
+                    3'd5: rd_rd_ptr_5 <= rd_rd_ptr_5 + 1;
+                    3'd6: rd_rd_ptr_6 <= rd_rd_ptr_6 + 1;
+                    3'd7: rd_rd_ptr_7 <= rd_rd_ptr_7 + 1;
+                endcase
+            end else begin
+                rvalid <= 1'b0;
             end
         end
     end
 
     //--------------------------------------------------------------------------
     // Write Response Channel
+    // Note: Removed strict lfsr[7] requirement to prevent hangs.
+    // Now uses lfsr for slight delay variation but always responds.
     //--------------------------------------------------------------------------
+    reg [2:0] resp_delay_cnt;
+
     always @(posedge clk) begin
         if (rst) begin
             bvalid <= 1'b0;
+            resp_delay_cnt <= 0;
         end else if (!bvalid || bready) begin
-            if (wr_resp_counter > 0 && lfsr[7]) begin
-                bvalid <= 1'b1;
-                wr_resp_counter <= wr_resp_counter - 1;
-                $display("%0t slave: write response sent", $time);
+            if (wr_resp_counter > 0) begin
+                // Small random delay (0-3 cycles) then send response
+                if (resp_delay_cnt == 0) begin
+                    resp_delay_cnt <= lfsr[1:0];  // 0-3 cycle delay
+                end else if (resp_delay_cnt == 1) begin
+                    bvalid <= 1'b1;
+                    wr_resp_counter <= wr_resp_counter - 1;
+                    resp_delay_cnt <= 0;
+                    $display("%0t slave: write response sent", $time);
+                end else begin
+                    resp_delay_cnt <= resp_delay_cnt - 1;
+                    bvalid <= 1'b0;
+                end
             end else begin
                 bvalid <= 1'b0;
+                resp_delay_cnt <= 0;
             end
         end
     end

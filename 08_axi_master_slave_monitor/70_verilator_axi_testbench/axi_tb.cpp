@@ -81,8 +81,16 @@ public:
         arvalid.write(false);
         awvalid.write(false);
         wvalid.write(false);
-        rready.write(true);
+        rready.write(false);  // Start with rready low
         bready.write(true);
+    }
+
+    //------------------------------------------------------------------------
+    // Control rready signal
+    //------------------------------------------------------------------------
+    void set_rready(bool val) {
+        rready.write(val);
+        sc_start(1, SC_NS);
     }
 
     void wait_clocks(int n) {
@@ -177,8 +185,11 @@ public:
     // Receive Read Data (blocking - waits for response)
     //------------------------------------------------------------------------
     uint32_t receive_read_data() {
+        // Assert rready to accept data
+        rready.write(true);
+
         // Wait for valid read data
-        while (!rvalid.read() || !rready.read()) {
+        while (!rvalid.read()) {
             sc_start(1, SC_NS);
         }
 
@@ -208,6 +219,9 @@ public:
 
         read_responses++;
         sc_start(1, SC_NS);
+
+        // Deassert rready after receiving
+        rready.write(false);
         return data;
     }
 
